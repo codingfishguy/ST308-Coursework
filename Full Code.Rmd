@@ -1,0 +1,245 @@
+---
+title: "ST308_Coursework"
+output: html_document
+---
+
+```{r}
+data <- read.csv("healthyminds.csv")
+```
+
+Data Cleaning
+
+Created gender_other column and kept only some columns as predictors in my dataset
+
+```{r}
+data$gender_other <- ifelse(
+  data$gender_queer == 1 | 
+  data$gender_nonbin == 1 | 
+  data$gender_trans == 1 | 
+  data$gender_prefnoresp == 1 | 
+  data$gender_selfID == 1, 1, 0)
+
+cleaned_data <- data[, c(
+  "age",
+  "gender_male", "gender_female", "gender_other",
+  "sexual_h", "sexual_l", "sexual_g", "sexual_bi", "sexual_queer", "sexual_quest", "sexual_asexual", "sexual_pan", "sexual_prefnoresp", "sexual_selfID",
+  "race_black", "race_ainaan", "race_asian", "race_his", "race_pi", "race_mides", "race_white", "race_other",
+  "international",
+  "housing_worry", "fincur", "finpast", "fin_comp1",
+  "degree_ass", "degree_bach", "degree_ma", "degree_jd", "degree_md", "degree_phd", "degree_other", "degree_nd",
+  "activ_none",
+  "yr_sch",
+  "enroll",
+  "field_hum", "field_nat", "field_soc", "field_arc", "field_art", "field_bus", "field_den", "field_ed", "field_eng", "field_law", "field_med", "field_mus", "field_nur", "field_pharm", "field_prep", "field_ph", "field_pp", "field_sw", "field_und", "field_other",
+  "gr_A", "gr_B", "gr_C", "gr_D", "gr_F", "gr_none", "gr_dk",
+  "living_sit", "residenc",
+  "belong1",
+  "dep_maj",
+  "thin_good",
+  "lonely",
+  "alc_any",
+  "sub_cig",
+  "smok_vape",
+  "schoolnum"
+)]
+
+```
+
+```{r}
+#Additionally in this dataset sometimes NA means 0. So I code this explicitly
+
+cols_to_zero <- c(
+  "gender_male", "gender_female", "gender_other",
+  "sexual_h", "sexual_l", "sexual_g", "sexual_bi", "sexual_queer", "sexual_quest", "sexual_asexual", "sexual_pan", "sexual_prefnoresp", "sexual_selfID",
+  "race_black", "race_ainaan", "race_asian", "race_his", "race_pi", "race_mides", "race_white", "race_other",
+  "international",
+  "housing_worry", "fincur", "finpast", "fin_comp1",
+  "degree_ass", "degree_bach", "degree_ma", "degree_jd", "degree_md", "degree_phd", "degree_other", "degree_nd",
+  "activ_none",
+  "field_hum", "field_nat", "field_soc", "field_arc", "field_art", "field_bus", "field_den", "field_ed", "field_eng", "field_law", "field_med", "field_mus", "field_nur", "field_pharm", "field_prep", "field_ph", "field_pp", "field_sw", "field_und", "field_other",
+  "gr_A", "gr_B", "gr_C", "gr_D", "gr_F", "gr_none", "gr_dk"
+)
+
+# Replace NAs with 0 in those columns
+cleaned_data[cols_to_zero] <- lapply(cleaned_data[cols_to_zero], function(x) {
+  x[is.na(x)] <- 0
+  return(x)
+})
+```
+
+
+Exploratory Data Analysis
+```{r}
+summary(cleaned_data$dep_maj) 
+```
+```{r}
+library(dplyr)
+
+cleaned_data <- cleaned_data %>%
+  filter(!is.na(dep_maj))
+
+#removed all rows where dep_maj was NA
+
+#Also removed all people of age greater than 60 as there are only a few of them and that will probably greatly skew the importance of age in the regression
+cleaned_data <- cleaned_data %>%
+  filter(age <= 60)
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Calculate proportion of dep_maj == 1 by school
+school_dep_rate <- cleaned_data %>%
+  group_by(schoolnum) %>%
+  summarise(dep_rate = mean(dep_maj, na.rm = TRUE),
+            n = n()) # Optional: sample size per school
+
+# Visualize
+ggplot(school_dep_rate, aes(x = schoolnum, y = dep_rate)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(se = FALSE, method = "loess", color = "blue") +
+  labs(title = "Proportion of Depression (dep_maj == 1) by School",
+       x = "School Number",
+       y = "Proportion Depressed") +
+  theme_minimal()
+
+
+
+```
+``` {r}
+library(ggplot2)
+
+ggplot(cleaned_data, aes(x = factor(dep_maj), y = age, fill = factor(dep_maj))) +
+  geom_boxplot() +
+  labs(
+    title = "Distribution of Age by Depression Status",
+    x = "Depression Diagnosis (0 = No, 1 = Yes)",
+    y = "Age"
+  ) +
+  scale_fill_manual(values = c("lightblue", "salmon")) +
+  theme_minimal()
+
+#cannot see a difference easily on boxplot  
+
+
+```
+Single Level Models
+
+```{r}
+#convert all columns in the dataset other than age to the factor type, so that the model treats them as such
+cleaned_data[ , names(cleaned_data) != "age"] <- lapply(cleaned_data[ , names(cleaned_data) != "age"], as.factor)
+```
+
+```{r}
+#First install necessary packages and libraries
+install.packages("rstanarm")
+library(rstanarm)
+```
+
+```{r}
+#Flat priors aren't recommended
+
+#flat_prior_test <- stan_glm(dep_maj~., data=smaller_sample, family=binomial(link="logit"), prior=NULL)
+
+#This code didn't even work. The flat priors made computation too slow.
+
+```
+
+```{r}
+#Single Level models
+#Lasso Prior model
+lasso_prior <- lasso(autoscale=TRUE)
+single_level <- stan_glm(dep_maj~., data=cleaned_data, prior=lasso_prior, family=binomial(link="logit")) 
+```
+
+```{r}
+#Default priors model
+single_level2 <- stan_glm(dep_maj~., data=cleaned_data, family=binomial(link="logit"))
+```
+
+```{r}
+loo_lasso <- loo(single_level)
+loo_default <- loo(single_level2)
+loo_compare(loo_lasso, loo_default)
+
+#the lasso model was better
+```
+
+Results from Single Level Model
+```{r}
+prior_summary(single_level) #(lasso)
+```
+
+```{r}
+single_results <- posterior_interval(single_level, prob=0.95)
+round(single_results,2)
+```
+
+
+```{r}
+launch_shinystan(single_level, ppd=FALSE)
+```
+
+Hierarchical Model:
+
+I initially tried to run the hierarchical model like I did the single level model, but the model wouldn't even initialise. After some research, I concluded this was likely due to a 'perfect separation' issue, where perhaps some columns perfectly predicted the outcome. 
+
+```{r}
+#Default Priors
+#hierarchical_model <- stan_glmer(dep_maj ~ . + (1 | schoolnum), data = cleaned_data, family = binomial(link = "logit")) 
+
+#This was the code block that originally didn't run
+```
+
+```{r}
+#Default Priors model
+hierarchical_model <- stan_glmer(dep_maj ~ age + gender_male + sexual_h +race_white + activ_none + lonely + fincur + (1 | schoolnum), data = cleaned_data, family = binomial(link = "logit")) 
+```
+
+```{r}
+#Lasso Model
+#hierarchical_model2 <- stan_glmer(dep_maj ~ . + (1 | schoolnum), data = cleaned_data, prior = lasso_prior, family = binomial(link = "logit")) #Tried to see if lasso priors allowed all predictors to work like before
+```
+
+```{r}
+#Lasso Model attempt 2
+hierarchical_model2 <- stan_glmer(dep_maj ~ age + gender_male + sexual_h +race_white + activ_none + lonely + fincur + (1 | schoolnum), data = cleaned_data, prior=lasso_prior, family = binomial(link = "logit")) 
+
+```
+
+
+```{r}
+loo_lasso2 <- loo(hierarchical_model2)
+loo_default2 <- loo(hierarchical_model)
+loo_compare(loo_lasso2, loo_default2)
+
+#Lasso priors were better again
+```
+
+```{r}
+hier_results <- posterior_interval(hierarchical_model2, prob=0.95)
+round(hier_results,2)
+```
+```{r}
+launch_shinystan(hierarchical_model2, ppd=FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
